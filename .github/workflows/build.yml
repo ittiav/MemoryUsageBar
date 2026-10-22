@@ -1,0 +1,48 @@
+name: Build and test
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build universal app
+        run: ./scripts/build.sh
+      - name: Test memory accounting and placement
+        run: ./scripts/test.sh
+      - name: Package
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent build/MemoryUsageBar.app build/MemoryUsageBar-macos-universal.zip
+          cd build
+          shasum -a 256 MemoryUsageBar-macos-universal.zip > SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: MemoryUsageBar-macos-universal
+          path: |
+            build/MemoryUsageBar-macos-universal.zip
+            build/SHA256SUMS.txt
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: MemoryUsageBar-macos-universal
+          path: release
+      - name: Publish tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release/MemoryUsageBar-macos-universal.zip release/SHA256SUMS.txt --verify-tag --generate-notes
